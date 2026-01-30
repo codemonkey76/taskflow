@@ -5,6 +5,8 @@ use crate::queue::{ItemState, Queue};
 use crate::ui::{
     ControlsState, QueueListInteraction, render_controls, render_drop_zone, render_queue_list,
 };
+use poll_promise::Promise;
+use std::path::PathBuf;
 
 pub struct TaskFlowApp {
     queue: Queue,
@@ -17,14 +19,20 @@ pub struct TaskFlowApp {
     status_message: String,
     last_clicked_index: Option<usize>,
 
-    // Available scripts (TODO: load from config/directory)
+    // Available scripts
     available_scripts: Vec<String>,
+
+    // Dialog promises
+    script_dialog: Option<Promise<Option<PathBuf>>>,
+    output_dialog: Option<Promise<Option<PathBuf>>>,
 }
 
 impl TaskFlowApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let config = Config::load();
         let logger = Logger::new(config.output_directory.clone(), config.logging_enabled);
+
+        let available_scripts = config.available_scripts.clone();
 
         Self {
             queue: Queue::new(),
@@ -34,10 +42,9 @@ impl TaskFlowApp {
             is_processing: false,
             status_message: "Ready".to_string(),
             last_clicked_index: None,
-            available_scripts: vec![
-                "/path/to/script1.sh".to_string(),
-                "/path/to/script2.sh".to_string(),
-            ],
+            available_scripts,
+            script_dialog: None,
+            output_dialog: None,
         }
     }
 
@@ -46,6 +53,34 @@ impl TaskFlowApp {
     }
 
     fn handle_controls(&mut self, state: ControlsState) {
+        // Handle add script dialog
+        if state.add_script_clicked && self.script_dialog.is_none() {
+            let promise =
+                Promise::spawn_thread("script_dialog", move || rfd::FileDialog::new().pick_file());
+            self.script_dialog = Some(promise);
+        }
+
+        // Handle output dialog
+        if state.browse_output_clicked && self.output_dialog.is_none() {
+            let promise = Promise::spawn_thread("output_dialog", move || {
+                rfd::FileDialog::new().pick_folder()
+            });
+            self.output_dialog = Some(promise);
+        }
+
+        // Handle script remove
+        if let Some(index) = state.script_to_remove {
+            if index < self.available_scripts.len() {
+                let removed = self.available_scripts.remove(index);
+                // If we removed the selected script, clear selection
+                if self.config.selected_script.as_ref() == Some(&removed) {
+                    self.config.selected_script = None;
+                }
+                self.config.available_scripts = self.available_scripts.clone();
+                let _ = self.config.save();
+            }
+        }
+
         if state.script_changed || state.output_changed {
             let _ = self.config.save();
         }
@@ -64,6 +99,37 @@ impl TaskFlowApp {
 
         if state.cancel_clicked {
             self.cancel_processing();
+        }
+    }
+
+    fn poll_dialogs(&mut self) {
+        // Check script dialog
+        if let Some(promise) = &self.script_dialog {
+            if let Some(result) = promise.ready() {
+                if let Some(path) = result {
+                    if let Some(path_str) = path.to_str() {
+                        let script = path_str.to_string();
+                        if !self.available_scripts.contains(&script) {
+                            self.available_scripts.push(script.clone());
+                            self.config.selected_script = Some(script);
+                            self.config.available_scripts = self.available_scripts.clone();
+                            let _ = self.config.save();
+                        }
+                    }
+                }
+                self.script_dialog = None;
+            }
+        }
+
+        // Check output dialog
+        if let Some(promise) = &self.output_dialog {
+            if let Some(result) = promise.ready() {
+                if let Some(path) = result {
+                    self.config.output_directory = Some(path.clone());
+                    let _ = self.config.save();
+                }
+                self.output_dialog = None;
+            }
         }
     }
 
@@ -179,6 +245,9 @@ impl eframe::App for TaskFlowApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Poll for processor results
         self.poll_processor();
+
+        // Poll for dialog results
+        self.poll_dialogs();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("TaskFlow");

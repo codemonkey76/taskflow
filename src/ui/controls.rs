@@ -7,6 +7,9 @@ pub struct ControlsState {
     pub logging_changed: bool,
     pub start_clicked: bool,
     pub cancel_clicked: bool,
+    pub add_script_clicked: bool,
+    pub browse_output_clicked: bool,
+    pub script_to_remove: Option<usize>,
 }
 
 impl Default for ControlsState {
@@ -17,6 +20,9 @@ impl Default for ControlsState {
             logging_changed: false,
             start_clicked: false,
             cancel_clicked: false,
+            add_script_clicked: false,
+            browse_output_clicked: false,
+            script_to_remove: None,
         }
     }
 }
@@ -31,28 +37,34 @@ pub fn render_controls(
 ) -> ControlsState {
     let mut state = ControlsState::default();
 
-    ui.horizontal(|ui| {
-        ui.label("Script:");
+    // Script list with add/remove
+    ui.label("Scripts:");
 
-        let current_script = selected_script
-            .as_ref()
-            .map(|s| s.as_str())
-            .unwrap_or("Select script...");
+    // Show existing scripts with remove button
+    let mut script_height = 0.0;
+    for (index, script) in scripts.iter().enumerate() {
+        ui.horizontal(|ui| {
+            // Script name (selectable)
+            let is_selected = selected_script.as_ref() == Some(script);
+            if ui.selectable_label(is_selected, script).clicked() {
+                *selected_script = Some(script.clone());
+                state.script_changed = true;
+            }
 
-        egui::ComboBox::from_id_salt("script_selector")
-            .selected_text(current_script)
-            .show_ui(ui, |ui| {
-                for script in scripts {
-                    if ui
-                        .selectable_label(selected_script.as_ref() == Some(script), script)
-                        .clicked()
-                    {
-                        *selected_script = Some(script.clone());
-                        state.script_changed = true;
-                    }
-                }
-            });
-    });
+            // Remove button (X)
+            if ui.button("✖").clicked() {
+                state.script_to_remove = Some(index);
+            }
+        });
+        script_height += ui.spacing().interact_size.y;
+    }
+
+    // Add script button
+    if ui.button("+ Add Script").clicked() {
+        state.add_script_clicked = true;
+    }
+
+    ui.add_space(10.0);
 
     ui.horizontal(|ui| {
         ui.label("Output:");
@@ -65,10 +77,7 @@ pub fn render_controls(
         ui.add(egui::Label::new(dir_text).truncate());
 
         if ui.button("Browse...").clicked() {
-            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                *output_dir = Some(path);
-                state.output_changed = true;
-            }
+            state.browse_output_clicked = true;
         }
     });
 

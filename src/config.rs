@@ -6,6 +6,7 @@ pub struct Config {
     pub selected_script: Option<String>,
     pub output_directory: Option<PathBuf>,
     pub logging_enabled: bool,
+    pub available_scripts: Vec<String>,
 }
 
 impl Default for Config {
@@ -14,6 +15,7 @@ impl Default for Config {
             selected_script: None,
             output_directory: None,
             logging_enabled: false,
+            available_scripts: vec![],
         }
     }
 }
