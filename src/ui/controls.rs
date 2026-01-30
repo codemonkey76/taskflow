@@ -41,7 +41,6 @@ pub fn render_controls(
     ui.label("Scripts:");
 
     // Show existing scripts with remove button
-    let mut script_height = 0.0;
     for (index, script) in scripts.iter().enumerate() {
         ui.horizontal(|ui| {
             // Script name (selectable)
@@ -56,7 +55,6 @@ pub fn render_controls(
                 state.script_to_remove = Some(index);
             }
         });
-        script_height += ui.spacing().interact_size.y;
     }
 
     // Add script button

@@ -3,7 +3,8 @@ use crate::logger::Logger;
 use crate::processor::{Processor, ProcessorResult};
 use crate::queue::{ItemState, Queue};
 use crate::ui::{
-    ControlsState, QueueListInteraction, render_controls, render_drop_zone, render_queue_list,
+    ControlsState, DropZoneResult, QueueListInteraction, render_controls, render_drop_zone,
+    render_queue_list,
 };
 use poll_promise::Promise;
 use std::path::PathBuf;
@@ -25,6 +26,7 @@ pub struct TaskFlowApp {
     // Dialog promises
     script_dialog: Option<Promise<Option<PathBuf>>>,
     output_dialog: Option<Promise<Option<PathBuf>>>,
+    browse_files_dialog: Option<Promise<Option<Vec<PathBuf>>>>,
 }
 
 impl TaskFlowApp {
@@ -45,11 +47,17 @@ impl TaskFlowApp {
             available_scripts,
             script_dialog: None,
             output_dialog: None,
+            browse_files_dialog: None,
         }
     }
 
     fn handle_file_drops(&mut self, paths: Vec<std::path::PathBuf>) {
+        println!("handle_file_drops called with {} paths", paths.len());
+        for path in &paths {
+            println!("  Adding to queue: {:?}", path);
+        }
         self.queue.add_multiple(paths);
+        println!("Queue now has {} items", self.queue.len());
     }
 
     fn handle_controls(&mut self, state: ControlsState) {
@@ -129,6 +137,16 @@ impl TaskFlowApp {
                     let _ = self.config.save();
                 }
                 self.output_dialog = None;
+            }
+        }
+
+        // Check browse files dialog
+        if let Some(promise) = &self.browse_files_dialog {
+            if let Some(result) = promise.ready() {
+                if let Some(paths) = result {
+                    self.handle_file_drops(paths.clone());
+                }
+                self.browse_files_dialog = None;
             }
         }
     }
@@ -254,8 +272,21 @@ impl eframe::App for TaskFlowApp {
             ui.separator();
 
             // Drop zone
-            if let Some(paths) = render_drop_zone(ui) {
-                self.handle_file_drops(paths);
+            match render_drop_zone(ui) {
+                DropZoneResult::DroppedFiles(paths) => {
+                    self.handle_file_drops(paths);
+                }
+                DropZoneResult::BrowseClicked => {
+                    if self.browse_files_dialog.is_none() {
+                        let promise = Promise::spawn_thread("browse_files", move || {
+                            rfd::FileDialog::new()
+                                .set_title("Select files to add to queue")
+                                .pick_files()
+                        });
+                        self.browse_files_dialog = Some(promise);
+                    }
+                }
+                DropZoneResult::None => {}
             }
 
             ui.add_space(10.0);
